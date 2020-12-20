@@ -4,39 +4,36 @@ using System.Linq;
 using Jerrycurl.Data.Metadata;
 using Jerrycurl.Relations.Metadata;
 using Jerrycurl.Data.Metadata.Annotations;
+using Jerrycurl.Relations;
 
 namespace Jerrycurl.Data.Metadata
 {
     public class ReferenceMetadataBuilder : IMetadataBuilder<IReferenceMetadata>
     {
-        public IReferenceMetadata GetMetadata(IMetadataBuilderContext context) => this.GetMetadata(context, context.Identity);
+        public IReferenceMetadata GetMetadata(IMetadataBuilderContext context) => this.GetMetadata(context, context.Relation);
 
-        private IReferenceMetadata GetMetadata(IMetadataBuilderContext context, MetadataIdentity identity)
+        private IReferenceMetadata GetMetadata(IMetadataBuilderContext context, IRelationMetadata relation)
         {
-            MetadataIdentity parentIdentity = identity.Parent();
-            IReferenceMetadata parent = context.GetMetadata<IReferenceMetadata>(parentIdentity.Name) ?? this.GetMetadata(context, parentIdentity);
+            IReferenceMetadata parent = context.GetMetadata<IReferenceMetadata>(relation.Parent.Identity.Name) ?? this.GetMetadata(context, relation.Parent);
 
             if (parent == null)
                 return null;
-            else if (parent.Item != null && parent.Item.Identity.Equals(identity))
+            else if (parent.Item != null && parent.Item.Identity.Equals(relation.Identity))
                 return parent.Item;
 
-            return parent.Properties.FirstOrDefault(m => m.Identity.Equals(identity));
+            return parent.Properties.FirstOrDefault(m => m.Identity.Equals(relation.Identity));
         }
 
         public void Initialize(IMetadataBuilderContext context)
         {
-            IRelationMetadata relation = context.Schema.GetMetadata<IRelationMetadata>(context.Identity.Name);
+            IReferenceMetadata metadata = this.CreateBaseMetadata(context, context.Relation, null);
 
-            if (relation == null)
-                throw MetadataNotFoundException.FromMetadata<IRelationMetadata>(context.Identity);
-
-            context.AddMetadata<IReferenceMetadata>(this.CreateBaseMetadata(context, relation, null));
+            context.AddMetadata(metadata);
         }
 
-        private ReferenceMetadata CreateBaseMetadata(IMetadataBuilderContext context, IRelationMetadata attribute, ReferenceMetadata parent)
+        private ReferenceMetadata CreateBaseMetadata(IMetadataBuilderContext context, IRelationMetadata relation, ReferenceMetadata parent)
         {
-            ReferenceMetadata metadata = new ReferenceMetadata(attribute)
+            ReferenceMetadata metadata = new ReferenceMetadata(relation)
             {
                 Parent = parent,
             };
@@ -99,8 +96,8 @@ namespace Jerrycurl.Data.Metadata
             if (this.IsNativeKeylessType(parent.Type))
                 return Array.Empty<ReferenceKey>();
 
-            List<(ReferenceMetadata m, KeyAttribute a, string kn)> keyMap = new List<(ReferenceMetadata, KeyAttribute, string)>();
-            List<(ReferenceMetadata m, RefAttribute a, string rn, string kn)> refMap = new List<(ReferenceMetadata, RefAttribute, string, string)>();
+            List<(ReferenceMetadata Metadata, KeyAttribute Attribute, string KeyName)> keyMap = new List<(ReferenceMetadata, KeyAttribute, string)>();
+            List<(ReferenceMetadata Metadata, RefAttribute Attribute, string ReferenceName, string KeyName)> refMap = new List<(ReferenceMetadata, RefAttribute, string, string)>();
 
             foreach (ReferenceMetadata property in parent.Properties.Value)
             {
@@ -114,25 +111,25 @@ namespace Jerrycurl.Data.Metadata
                 foreach (RefAttribute refAttr in property.Relation.Annotations.OfType<RefAttribute>())
                 {
                     string refName = refAttr.Name;
-                    string keyName = refAttr.Key ?? property.Relation.Member?.Name ?? "";
+                    string keyName = refAttr.KeyName ?? property.Relation.Member?.Name ?? "";
 
                     refMap.Add((property, refAttr, refName, keyName));
                 }
             }
 
-            IEnumerable<ReferenceKey> candidateKeys = keyMap.GroupBy(t => t.kn).Select(g => new ReferenceKey()
+            IEnumerable<ReferenceKey> candidateKeys = keyMap.GroupBy(t => t.KeyName).Select(g => new ReferenceKey()
             {
-                Type = ReferenceKeyType.CandidateKey,
-                Name = g.First().kn,
-                Properties = g.OrderBy(t => t.a.Index).Select(t => t.m).ToList(),
+                Flags = g.All(t => t.Attribute.IsPrimary) ? ReferenceKeyFlags.Primary : ReferenceKeyFlags.Candidate,
+                Name = g.First().KeyName,
+                Properties = g.OrderBy(t => t.Attribute.Index).Select(t => t.Metadata).ToList(),
             });
 
-            IEnumerable<ReferenceKey> foreignKeys = refMap.GroupBy(t => (t.rn, t.kn)).Select(g => new ReferenceKey()
+            IEnumerable<ReferenceKey> foreignKeys = refMap.GroupBy(t => (t.ReferenceName, t.KeyName)).Select(g => new ReferenceKey()
             {
-                Type = ReferenceKeyType.ForeignKey,
-                Name = g.First().rn,
-                Other = g.First().kn,
-                Properties = g.OrderBy(t => t.a.Index).Select(t => t.m).ToList(),
+                Flags = ReferenceKeyFlags.Foreign,
+                Name = g.First().ReferenceName,
+                Other = g.First().KeyName,
+                Properties = g.OrderBy(t => t.Attribute.Index).Select(t => t.Metadata).ToList(),
             });
 
             return candidateKeys.Concat(foreignKeys);
@@ -142,11 +139,29 @@ namespace Jerrycurl.Data.Metadata
 
         private bool IsKeyMatch(IReferenceKey rightKey, IReferenceKey leftKey)
         {
-            if (leftKey.Type == rightKey.Type || leftKey.Properties.Count != rightKey.Properties.Count)
+            if (leftKey.Properties.Count != rightKey.Properties.Count)
                 return false;
 
-            IReferenceKey candidateKey = rightKey.Type == ReferenceKeyType.CandidateKey ? rightKey : leftKey;
-            IReferenceKey foreignKey = rightKey.Type == ReferenceKeyType.ForeignKey ? rightKey : leftKey;
+            bool leftIsCandidate = leftKey.HasFlag(ReferenceKeyFlags.Candidate);
+            bool rightIsCandidate = rightKey.HasFlag(ReferenceKeyFlags.Candidate);
+
+            bool leftIsForeign = leftKey.HasFlag(ReferenceKeyFlags.Foreign);
+            bool rightIsForeign = rightKey.HasFlag(ReferenceKeyFlags.Foreign);
+
+            IReferenceKey candidateKey, foreignKey;
+
+            if (leftIsCandidate && rightIsForeign)
+            {
+                candidateKey = leftKey;
+                foreignKey = rightKey;
+            }
+            else if (leftIsForeign && rightIsCandidate)
+            {
+                candidateKey = rightKey;
+                foreignKey = leftKey;
+            }
+            else
+                return false;
 
             return foreignKey.Other.Equals(candidateKey.Name, StringComparison.Ordinal);
         }
@@ -155,32 +170,67 @@ namespace Jerrycurl.Data.Metadata
         {
             if (metadata.Parent != null)
             {
-                yield return metadata;
-
-                yield return metadata.Parent;
-
-                if (metadata.Parent.HasFlag(RelationMetadataFlags.List) && metadata.Parent.Parent != null)
+                if (!metadata.Parent.HasFlag(RelationMetadataFlags.List))
+                    yield return metadata.Parent;
+                else if (metadata.Parent.Parent != null)
                     yield return metadata.Parent.Parent;
             }
         }
 
         private IEnumerable<ReferenceKey> GetPossibleChildKeys(ReferenceMetadata parent)
         {
-            IEnumerable<ReferenceKey> keys = parent.Properties.Value.SelectMany(a => a.Keys.Value);
+            IEnumerable<ReferenceKey> childKeys = parent.Properties.Value.SelectMany(a => a.Keys.Value);
+            IEnumerable<ReferenceKey> itemKeys = parent.Properties.Value.Where(m => m.Item != null).SelectMany(a => a.Item.Keys.Value);
+            IEnumerable<ReferenceKey> allKeys = childKeys.Concat(itemKeys);
 
-            keys = keys.Concat(parent.Properties.Value.Where(m => m.Item != null).SelectMany(a => a.Item.Keys.Value));
+            if (parent.Relation.HasFlag(RelationMetadataFlags.Recursive))
+                allKeys = allKeys.Concat(parent.Keys.Value);
 
-            return keys;
+            return allKeys;
         }
 
         private IEnumerable<Reference> CreateChildReferences(ReferenceMetadata metadata)
         {
             foreach (Reference reference in this.GetPossibleParents(metadata).SelectMany(m => m.ParentReferences.Value))
             {
-                if (reference.Metadata.Equals(metadata) && reference.HasFlag(ReferenceFlags.Self))
+                if (reference.Other.Metadata.Equals(metadata))
                     yield return reference.Other;
-                else if (reference.Other.Metadata.Equals(metadata))
-                    yield return reference.Other;
+            }
+        }
+
+        private bool HasOneAttribute(ReferenceMetadata metadata) => metadata.Annotations.OfType<OneAttribute>().Any();
+        private bool IsOneType(ReferenceMetadata metadata)
+        {
+            if (!metadata.Type.IsGenericType)
+                return false;
+
+            Type openType = metadata.Type.GetGenericTypeDefinition();
+
+            if (openType == typeof(One<>))
+                return true;
+
+            return false;
+        }
+
+        private int GetPriority(Reference parent, Reference child)
+        {
+            if (parent.HasFlag(ReferenceFlags.One) && child.HasFlag(ReferenceFlags.Many))
+            {
+                if (parent.HasFlag(ReferenceFlags.Primary))
+                    return 1;
+                else if (parent.HasFlag(ReferenceFlags.Candidate))
+                    return 2;
+                else
+                    return 3;
+            }
+            else
+            {
+                if (child.HasFlag(ReferenceFlags.Primary))
+                    return 1;
+                else if (child.HasFlag(ReferenceFlags.Candidate))
+                    return 2;
+                else
+                    return 3;
             }
         }
 
@@ -202,87 +252,73 @@ namespace Jerrycurl.Data.Metadata
                     {
                         ReferenceMetadata childMetadata = childKey.Properties.First().Parent;
 
-                        Reference rightRef = new Reference()
+                        Reference childRef = new Reference()
                         {
                             Metadata = childMetadata,
                             Flags = ReferenceFlags.Child,
                             Key = childKey,
                         };
 
-                        Reference leftRef = new Reference()
+                        Reference parentRef = new Reference()
                         {
                             Metadata = parent,
                             Flags = ReferenceFlags.Parent | ReferenceFlags.One,
                             Key = parentKey,
                         };
 
-                        if (childKey.Type == ReferenceKeyType.CandidateKey)
+                        if (childKey.HasFlag(ReferenceKeyFlags.Candidate))
                         {
-                            rightRef.Flags |= ReferenceFlags.Primary;
-                            leftRef.Flags |= ReferenceFlags.Foreign;
+                            childRef.Flags |= childKey.HasFlag(ReferenceKeyFlags.Primary) ? ReferenceFlags.Primary : ReferenceFlags.Candidate;
+                            parentRef.Flags |= ReferenceFlags.Foreign;
+
+                            if (childKey.HasFlag(ReferenceKeyFlags.Primary))
+                                childRef.Flags |= ReferenceFlags.Primary;
                         }
                         else
                         {
-                            rightRef.Flags |= ReferenceFlags.Foreign;
-                            leftRef.Flags |= ReferenceFlags.Primary;
+                            childRef.Flags |= ReferenceFlags.Foreign;
+                            parentRef.Flags |= parentKey.HasFlag(ReferenceKeyFlags.Primary) ? ReferenceFlags.Primary : ReferenceFlags.Candidate;
                         }
 
                         if (childMetadata.Relation.HasFlag(RelationMetadataFlags.Item))
                         {
-                            rightRef.Flags |= ReferenceFlags.Many;
-                            rightRef.List = leftRef.List = childMetadata.Parent;
+                            childRef.List = parentRef.List = childMetadata.Parent;
+
+                            if (this.IsOneType(childMetadata.Parent))
+                            {
+                                parentRef.Flags &= ~ReferenceFlags.One;
+                                parentRef.Flags |= ReferenceFlags.Many;
+                                childRef.Flags |= ReferenceFlags.One;
+                            }
+                            else
+                                childRef.Flags |= ReferenceFlags.Many;
+                        }
+                        else if (this.HasOneAttribute(childMetadata))
+                        {
+                            parentRef.Flags &= ~ReferenceFlags.One;
+                            parentRef.Flags |= ReferenceFlags.Many;
+                            childRef.Flags |= ReferenceFlags.One;
                         }
                         else
-                            rightRef.Flags |= ReferenceFlags.One;
+                            childRef.Flags |= ReferenceFlags.One;
 
-                        leftRef.Other = rightRef;
-                        rightRef.Other = leftRef;
+                        if (childMetadata.Equals(parent))
+                        {
+                            parentRef.Flags |= ReferenceFlags.Self | ReferenceFlags.Child;
+                            childRef.Flags |= ReferenceFlags.Self | ReferenceFlags.Parent;
+                        }
 
-                        references.Add(leftRef);
+                        parentRef.Priority = childRef.Priority = this.GetPriority(parentRef, childRef);
+
+                        parentRef.Other = childRef;
+                        childRef.Other = parentRef;
+
+                        references.Add(parentRef);
                     }
-                }
-            }
-
-
-            foreach (Reference reference in references.ToList())
-            {
-                Reference other = references.Except(new[] { reference }).FirstOrDefault(r => r.Other.Key.Equals(reference.Key));
-
-                if (other != null && this.IsPreferredParentForSelfJoin(reference, other))
-                {
-                    if (reference.Other.Metadata.Relation.HasFlag(RelationMetadataFlags.Recursive))
-                    {
-                        reference.Flags |= ReferenceFlags.Self;
-                        reference.Other.Flags |= ReferenceFlags.Self;
-                        reference.Other.Key = other.Key;
-                    }
-
-                    references.Remove(other);
                 }
             }
 
             return references;
-        }
-
-        private bool IsPreferredParentForSelfJoin(IReference reference, IReference other)
-        {
-            if (reference.Other.HasFlag(ReferenceFlags.Many) && other.HasFlag(ReferenceFlags.Foreign))
-                return true;
-            else if (reference.Other.HasFlag(ReferenceFlags.One) && other.HasFlag(ReferenceFlags.Primary))
-                return true;
-
-            return false;
-        }
-
-        private class DuplicateKeyComparer<TKey> : IComparer<TKey>
-            where TKey : IComparable
-        {
-            public int Compare(TKey x, TKey y)
-            {
-                int result = x.CompareTo(y);
-
-                return result == 0 ? 1 : result;
-            }
         }
     }
 }

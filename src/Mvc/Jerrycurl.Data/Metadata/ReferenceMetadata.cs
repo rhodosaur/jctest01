@@ -1,16 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jerrycurl.Diagnostics;
 using Jerrycurl.Relations.Metadata;
 
 namespace Jerrycurl.Data.Metadata
 {
     internal class ReferenceMetadata : IReferenceMetadata
     {
-        public MetadataIdentity Identity { get; }
+        public MetadataIdentity Identity => this.Relation.Identity;
         public IRelationMetadata Relation { get; }
-        public Type Type { get; }
+        public Type Type => this.Relation.Type;
 
         public ReferenceMetadataFlags Flags { get; set; }
         public Lazy<IReadOnlyList<ReferenceKey>> Keys { get; set; }
@@ -31,17 +30,8 @@ namespace Jerrycurl.Data.Metadata
 
         public ReferenceMetadata(IRelationMetadata relation)
         {
-            if (relation == null)
-                throw new ArgumentNullException(nameof(relation));
-
-            this.Identity = relation.Identity;
-            this.Type = relation.Type;
-            this.Relation = relation;
+            this.Relation = relation ?? throw new ArgumentNullException(nameof(relation));
         }
-
-        public bool Equals(IReferenceMetadata other) => Equality.Combine(this.Identity, other?.Identity);
-        public override int GetHashCode() => this.Identity.GetHashCode();
-        public override bool Equals(object obj) => (obj is IReferenceMetadata other && this.Equals(other));
 
         public override string ToString() => $"IReferenceMetadata: {this.Identity}";
 

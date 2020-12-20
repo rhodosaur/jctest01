@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Linq.Expressions;
 using Jerrycurl.Mvc.Projections;
-using Jerrycurl.Relations;
 
 namespace Jerrycurl.Mvc.Sql
 {
@@ -14,12 +13,10 @@ namespace Jerrycurl.Mvc.Sql
         /// <returns>A new attribute containing the appended buffer.</returns>
         public static IProjectionAttribute Var(this IProjectionAttribute attribute)
         {
-            if (attribute.Field == null)
-                throw ProjectionException.ValueNotFound(attribute);
+            if (attribute.Data == null)
+                throw ProjectionException.ValueNotFound(attribute.Metadata);
 
-            IField field = ProjectionHelper.GetFieldValue(attribute);
-
-            string variableName = attribute.Context.Lookup.Variable(attribute.Identity, field);
+            string variableName = attribute.Context.Lookup.Variable(attribute.Identity, attribute.Data.Input);
             string dialectName = attribute.Context.Domain.Dialect.Variable(variableName);
 
             return attribute.Append(dialectName);

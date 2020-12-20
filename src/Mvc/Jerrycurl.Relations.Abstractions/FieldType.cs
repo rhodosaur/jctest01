@@ -2,8 +2,8 @@
 {
     public enum FieldType
     {
-        Model = 1,
-        Value = 2,
-        Missing = 3,
+        Model = 0,
+        Value = 1,
+        Missing = 2,
     }
 }

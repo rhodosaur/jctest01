@@ -1,4 +1,4 @@
-﻿using Jerrycurl.Diagnostics;
+﻿using System;
 using Jerrycurl.Relations.Metadata;
 
 namespace Jerrycurl.Mvc.Metadata
@@ -13,12 +13,8 @@ namespace Jerrycurl.Mvc.Metadata
 
         public JsonMetadata(IRelationMetadata relation)
         {
-            this.Relation = relation;
+            this.Relation = relation ?? throw new ArgumentNullException(nameof(relation));
         }
-
-        public bool Equals(IJsonMetadata other) => Equality.Combine(this.Identity, other?.Identity);
-        public override int GetHashCode() => this.Identity.GetHashCode();
-        public override bool Equals(object obj) => (obj is IJsonMetadata other && this.Equals(other));
 
         public override string ToString() => $"IJsonMetadata: {this.Identity}";
     }

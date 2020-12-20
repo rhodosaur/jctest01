@@ -1,13 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Jerrycurl.Relations.Metadata;
 
 namespace Jerrycurl.Data.Metadata
 {
-    public interface ITableMetadata : IMetadata, IEquatable<ITableMetadata>
+    public interface ITableMetadata : IMetadata
     {
+        MetadataIdentity Identity { get; }
         TableMetadataFlags Flags { get; }
-        ITableMetadata MemberOf { get; }
+        ITableMetadata Owner { get; }
         IReadOnlyList<ITableMetadata> Properties { get; }
         ITableMetadata Item { get; }
 

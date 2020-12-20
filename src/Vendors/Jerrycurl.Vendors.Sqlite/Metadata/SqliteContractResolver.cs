@@ -8,21 +8,24 @@ namespace Jerrycurl.Vendors.Sqlite.Metadata
     public class SqliteContractResolver : IBindingContractResolver
     {
         public int Priority => 1000;
+
         public IBindingCompositionContract GetCompositionContract(IBindingMetadata metadata) => null;
         public IBindingParameterContract GetParameterContract(IBindingMetadata metadata) => null;
         public IBindingHelperContract GetHelperContract(IBindingMetadata metadata) => null;
         public IBindingValueContract GetValueContract(IBindingMetadata metadata)
         {
+            IBindingValueContract fallback = metadata.Value;
+
             return new BindingValueContract()
             {
-                Read = this.GetRecordReaderMethod,
-                Convert = metadata.Value.Convert,
+                Read = ci => this.GetRecordReaderMethod(ci, fallback),
+                Convert = fallback?.Convert,
             };
         }
 
         private MethodInfo GetRecordMethod(string methodName) => typeof(IDataRecord).GetMethod(methodName, new[] { typeof(int) });
 
-        private MethodInfo GetRecordReaderMethod(IBindingColumnInfo columnInfo)
+        private MethodInfo GetRecordReaderMethod(IBindingColumnInfo columnInfo, IBindingValueContract fallback)
         {
             switch (columnInfo.Column.TypeName?.ToLower())
             {
@@ -61,7 +64,7 @@ namespace Jerrycurl.Vendors.Sqlite.Metadata
                     return this.GetBlobReaderMethod(columnInfo.Metadata);
             }
 
-            return null;
+            return fallback?.Read(columnInfo);
         }
 
         private MethodInfo GetBlobReaderMethod(IBindingMetadata metadata)

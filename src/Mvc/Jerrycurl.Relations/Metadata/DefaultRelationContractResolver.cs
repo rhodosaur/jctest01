@@ -2,16 +2,17 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Jerrycurl.Reflection;
 
-namespace Jerrycurl.Relations.Metadata.Contracts
+namespace Jerrycurl.Relations.Metadata
 {
     public class DefaultRelationContractResolver : IRelationContractResolver
     {
-        public IRelationListContract GetListContract(IRelationMetadata metadata)
+        public IRelationContract GetContract(IRelationMetadata metadata)
         {
             if (this.IsEnumerable(metadata))
             {
-                return new RelationListContract()
+                return new RelationContract()
                 {
                     ItemType = this.GetGenericItemType(metadata),
                     ReadIndex = this.GetListIndexReader(metadata),
@@ -20,20 +21,27 @@ namespace Jerrycurl.Relations.Metadata.Contracts
             }
             else if (this.IsOneDimensionalArray(metadata))
             {
-                return new RelationListContract()
+                return new RelationContract()
                 {
                     ItemType = this.GetArrayItemType(metadata),
                     ReadIndex = this.GetArrayIndexReader(metadata),
                     WriteIndex = this.GetArrayIndexWriter(metadata),
                 };
             }
+            else if (this.IsOneType(metadata))
+            {
+                return new RelationContract()
+                {
+                    ItemType = this.GetGenericItemType(metadata),
+                };
+            }
 
             return null;
         }
 
-        public IEnumerable<Attribute> GetAnnotationContract(IRelationMetadata metadata)
+        public IEnumerable<Attribute> GetAnnotations(IRelationMetadata metadata)
         {
-            return metadata.Type.GetCustomAttributes(true).OfType<Attribute>().Concat(metadata.Member?.GetCustomAttributes() ?? Array.Empty<Attribute>());
+            return metadata.Type.GetCustomAttributes(inherit: true).OfType<Attribute>().Concat(metadata.Member?.GetCustomAttributes() ?? Array.Empty<Attribute>());
         }
 
         private bool IsEnumerable(IRelationMetadata metadata)
@@ -49,7 +57,6 @@ namespace Jerrycurl.Relations.Metadata.Contracts
                 typeof(ICollection<>),
                 typeof(IReadOnlyList<>),
                 typeof(IReadOnlyCollection<>),
-                typeof(Many<>),
             };
 
             Type openType = metadata.Type.GetGenericTypeDefinition();
@@ -60,6 +67,18 @@ namespace Jerrycurl.Relations.Metadata.Contracts
             return true;
         }
 
+        private bool IsOneType(IRelationMetadata metadata)
+        {
+            if (!metadata.Type.IsGenericType)
+                return false;
+
+            Type openType = metadata.Type.GetGenericTypeDefinition();
+
+            if (openType == typeof(One<>))
+                return true;
+
+            return false;
+        }
 
         private bool IsOneDimensionalArray(IRelationMetadata metadata) => (metadata.Type.IsArray && metadata.Type.GetArrayRank() == 1);
 
@@ -69,16 +88,25 @@ namespace Jerrycurl.Relations.Metadata.Contracts
         private MethodInfo GetListIndexReader(IRelationMetadata metadata) => this.GetListIndexer(metadata)?.GetMethod;
 
         private Type GetArrayItemType(IRelationMetadata metadata) => metadata.Type.GetElementType();
-        private MethodInfo GetArrayIndexWriter(IRelationMetadata metadata) => metadata.Type.GetMethod("Set", new[] { typeof(int), metadata.Type });
+        private MethodInfo GetArrayIndexWriter(IRelationMetadata metadata) => metadata.Type.GetMethod("Set", new[] { typeof(int), metadata.Type.GetElementType() });
         private MethodInfo GetArrayIndexReader(IRelationMetadata metadata) => metadata.Type.GetMethod("Get", new[] { typeof(int) });
 
         private PropertyInfo GetListIndexer(IRelationMetadata metadata)
         {
-            Type[] allowedTypes = new Type[]
+            Type[] allowedTypes = new[]
             {
                 typeof(IList<>),
                 typeof(List<>),
+                typeof(IEnumerable<>),
+                typeof(ICollection<>),
                 typeof(IReadOnlyList<>),
+                typeof(IReadOnlyCollection<>),
+            };
+            Type[] convertTypes = new[]
+            {
+                typeof(IEnumerable<>),
+                typeof(ICollection<>),
+                typeof(IReadOnlyCollection<>),
             };
 
             Type openType = metadata.Type.GetGenericTypeDefinition();
@@ -86,7 +114,15 @@ namespace Jerrycurl.Relations.Metadata.Contracts
             if (!allowedTypes.Contains(openType))
                 return null;
 
-            return metadata.Type.GetProperties().FirstOrDefault(pi => pi.Name == "Item" && pi.GetIndexParameters().FirstOrDefault()?.ParameterType == typeof(int));
+            if (convertTypes.Contains(openType))
+            {
+                Type itemType = metadata.Type.GetGenericArguments()[0];
+                Type listType = typeof(IList<>).MakeGenericType(itemType);
+
+                return listType.GetIndexer();
+            }
+
+            return metadata.Type.GetIndexer();
         }
     }
 }

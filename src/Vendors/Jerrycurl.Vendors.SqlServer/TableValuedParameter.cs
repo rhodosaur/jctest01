@@ -7,7 +7,8 @@ using Jerrycurl.Data.Sessions;
 using Jerrycurl.Relations;
 using Jerrycurl.Relations.Metadata;
 using Jerrycurl.Vendors.SqlServer.Internal;
-#if SQLSERVER_LEGACY
+using BindingException = Jerrycurl.Data.Metadata.BindingException;
+#if NET20_BASE
 using System.Data.SqlClient;
 using Microsoft.SqlServer.Server;
 #else
@@ -22,7 +23,7 @@ namespace Jerrycurl.Vendors.SqlServer
         public string Name { get; }
         public IRelation Relation { get; }
 
-        IField IParameter.Field => null;
+        IField IParameter.Source => null;
 
         public TableValuedParameter(string name, IRelation relation)
         {
@@ -32,70 +33,146 @@ namespace Jerrycurl.Vendors.SqlServer
 
         public void Build(IDbDataParameter adoParameter)
         {
-            SqlParameter sqlParam = adoParameter as SqlParameter ?? throw new InvalidOperationException("Table-valued parameters are only supported on SqlParameter instances.");
+            SqlParameter tableParam = adoParameter as SqlParameter ?? throw new InvalidOperationException("Table-valued parameters are only supported on SqlParameter instances.");
 
-            sqlParam.ParameterName = this.Name;
+            tableParam.ParameterName = this.Name;
 
-            Action<SqlParameter, IRelation> binder = TvpCache.Binders.GetOrAdd(this.Relation.Identity, key =>
+            Action<SqlParameter, IRelation> binder = TvpCache.Binders.GetOrAdd(this.Relation.Header, key =>
             {
-                ITableMetadata[] columnMetadata = key.Heading.Select(m => m.GetMetadata<ITableMetadata>()).Where(m => m.HasFlag(TableMetadataFlags.Column)).ToArray();
-                IBindingMetadata[] bindingMetadata = columnMetadata.Select(m => m.Identity.GetMetadata<IBindingMetadata>()).ToArray();
+                GetHeadingMetadata(key, out IBindingMetadata[] bindingMetadata, out ITableMetadata[] columnMetadata);
 
-                if (bindingMetadata.Length == 0)
-                    throw new InvalidOperationException("No columns found.");
-
-                ITableMetadata tableMetadata = columnMetadata[0].HasFlag(TableMetadataFlags.Table) ? columnMetadata[0] : columnMetadata[0].MemberOf;
+                ITableMetadata tableMetadata = columnMetadata[0].HasFlag(TableMetadataFlags.Table) ? columnMetadata[0] : columnMetadata[0].Owner;
 
                 string tvpName = string.Join(".", tableMetadata.TableName);
                 string[] columnNames = columnMetadata.Select(m => m.ColumnName).ToArray();
                 BindingParameterConverter[] converters = bindingMetadata.Select(m => m?.Parameter?.Convert).ToArray();
 
-                return (sp, r) => BindParameter(sp, tvpName, columnNames,  converters, r);
+                return (sp, r) => BindParameter(sp, tvpName, columnNames,  converters, bindingMetadata, r);
             });
 
-            binder(sqlParam, this.Relation);
+            binder(tableParam, this.Relation);
         }
 
-
-        private static void BindParameter(SqlParameter sqlParam, string tvpName, string[] columnNames, BindingParameterConverter[] converters, IRelation relation)
+        private static void GetHeadingMetadata(IRelationHeader header, out IBindingMetadata[] bindingMetadata, out ITableMetadata[] columnMetadata)
         {
-            ITuple refTuple = relation.Row();
+            bindingMetadata = new IBindingMetadata[header.Attributes.Count];
+            columnMetadata = new ITableMetadata[header.Attributes.Count];
 
-            IEnumerable<SqlDataRecord> iterator()
+            for (int i = 0; i < header.Attributes.Count; i++)
             {
-                SqlDataRecord record = GetDataRecord(columnNames, refTuple);
+                IBindingMetadata bindingEntry = header.Attributes[i].Identity.Require<IBindingMetadata>();
+                ITableMetadata tableEntry = header.Attributes[i].Identity.Require<ITableMetadata>();
 
-                foreach (ITuple tuple in relation)
+                bindingMetadata[i] = bindingEntry;
+                columnMetadata[i] = tableEntry;
+            }
+
+            if (bindingMetadata.Length == 0)
+                throw new InvalidOperationException("No columns found.");
+        }
+
+        private static void BindParameter(SqlParameter tableParam, string tvpName, string[] columnNames, BindingParameterConverter[] converters, IBindingMetadata[] metadata, IRelation relation)
+        {
+            SqlMetaData[] tableHeader = InferSqlMetaDataHeader(metadata, relation, columnNames);
+
+            if (tableHeader == null)
+                tableParam.Value = null;
+            else
+            {
+                SqlDataRecord dataRecord = new SqlDataRecord(tableHeader);
+
+                tableParam.Value = valueEnumerator();
+
+                IEnumerable<SqlDataRecord> valueEnumerator()
                 {
-                    SetRecordValues(record, tuple, converters);
+                    using IRelationReader reader = relation.GetReader();
 
-                    yield return record;
+                    while (reader.Read())
+                    {
+                        for (int i = 0; i < reader.Degree; i++)
+                        {
+                            object value = reader[i].Snapshot;
+
+                            if (converters[i] != null)
+                                value = converters[i](value);
+
+                            dataRecord.SetValue(i, value);
+                        }
+
+                        yield return dataRecord;
+                    }
                 }
             }
 
-            if (refTuple == null)
-                sqlParam.Value = Array.Empty<SqlDataRecord>();
-            else
-                sqlParam.Value = iterator();
-
-            sqlParam.SqlDbType = SqlDbType.Structured;
-            sqlParam.TypeName = tvpName;
+            tableParam.SqlDbType = SqlDbType.Structured;
+            tableParam.TypeName = tvpName;
         }
 
-        private static SqlDataRecord GetDataRecord(string[] columnNames, ITuple tuple)
+        private static SqlMetaData[] InferSqlMetaDataHeader(IBindingMetadata[] metadata, IRelation relation, string[] columnNames)
         {
-            SqlMetaData[] columns = columnNames.Zip(tuple, (n, f) => SqlMetaData.InferFromValue(f.Value, n)).ToArray();
+            using IRelationReader reader = relation.GetReader();
 
-            return new SqlDataRecord(columns);
-        }
-
-        private static void SetRecordValues(SqlDataRecord record, ITuple tuple, BindingParameterConverter[] converters)
-        {
-            for (int i = 0; i < record.FieldCount; i++)
+            if (reader.Read())
             {
-                object value = converters[i]?.Invoke(tuple[i].Value) ?? tuple[i].Value;
+                SqlMetaData[] header = new SqlMetaData[reader.Degree];
 
-                record.SetValue(i, value);
+                for (int i = 0; i < metadata.Length; i++)
+                {
+                    Parameter param = new Parameter("P", reader[i]);
+                    SqlParameter sqlParam = new SqlParameter();
+
+                    param.Build(sqlParam);
+
+                    header[i] = InferSqlMetaData(metadata[i], sqlParam, columnNames[i]);
+                }
+
+                return header;
+            }
+
+            return null;
+        }
+
+        private static SqlMetaData InferSqlMetaData(IBindingMetadata metadata, SqlParameter sqlParam, string columnName)
+        {
+            switch (sqlParam.SqlDbType)
+            {
+                case SqlDbType.Bit:
+                case SqlDbType.TinyInt:
+                case SqlDbType.Float:
+                case SqlDbType.SmallInt:
+                case SqlDbType.Int:
+                case SqlDbType.BigInt:
+                case SqlDbType.Real:
+                case SqlDbType.Date:
+                case SqlDbType.Xml:
+                case SqlDbType.Variant:
+                    return new SqlMetaData(columnName, sqlParam.SqlDbType);
+                case SqlDbType.NVarChar:
+                case SqlDbType.VarChar:
+                case SqlDbType.VarBinary:
+                case SqlDbType.NChar:
+                case SqlDbType.Text:
+                case SqlDbType.NText:
+                case SqlDbType.Char:
+                    return new SqlMetaData(columnName, sqlParam.SqlDbType, -1);
+                case SqlDbType.Decimal:
+                    return new SqlMetaData(columnName, SqlDbType.Decimal, 38, 19);
+                case SqlDbType.DateTime:
+                case SqlDbType.DateTime2:
+                case SqlDbType.DateTimeOffset:
+                case SqlDbType.Time:
+                    return new SqlMetaData(columnName, sqlParam.SqlDbType, 0, 7);
+                default:
+                    {
+                        try
+                        {
+                            return new SqlMetaData(columnName, sqlParam.SqlDbType);
+                        }
+                        catch (Exception ex)
+                        {
+                            throw BindingException.Create(metadata, $"Cannot create TVP value from type {sqlParam.SqlDbType}.", ex);
+                        }
+                    }
             }
         }
     }

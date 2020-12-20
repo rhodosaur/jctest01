@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -6,19 +7,39 @@ namespace Jerrycurl.Collections
 {
     internal static class EnumerableExtensions
     {
+        public static IEnumerable<T> DistinctBy<T, TDistinct>(this IEnumerable<T> source, Func<T, TDistinct> keySelector)
+        {
+            HashSet<TDistinct> set = new HashSet<TDistinct>();
+
+            foreach (T value in source)
+            {
+                TDistinct key = keySelector(value);
+
+                if (!set.Contains(key))
+                    yield return value;
+
+                set.Add(key);
+            }
+        }
+
         public static T Second<T>(this IEnumerable<T> source) => source.Skip(1).First();
         public static T SecondOrDefault<T>(this IEnumerable<T> source) => source.Skip(1).FirstOrDefault();
+
+        public static IEnumerable<T> Except<T>(this IEnumerable<T> source, T element) => source.Except(new[] { element });
 
         public static HashSet<T> ToSet<T>(this IEnumerable<T> source) => new HashSet<T>(source);
         public static HashSet<T> ToSet<T>(this IEnumerable<T> source, IEqualityComparer<T> comparer) => new HashSet<T>(source, comparer);
 
-#if !NETCOREAPP3_0
-        public static IEnumerable<(TFirst l, TSecond r)> Zip<TFirst, TSecond>(this IEnumerable<TFirst> source, IEnumerable<TSecond> second) => source.Zip(second, (l, r) => (l, r));
+        public static T FirstOfType<T>(this IEnumerable source) => source.OfType<T>().FirstOrDefault();
+        public static T FirstOfType<T>(this IEnumerable source, Func<T, bool> predicate) => source.OfType<T>().FirstOrDefault(predicate);
+
+#if !NETCOREAPP3_1 && !NET5_0
+        public static IEnumerable<(TFirst First, TSecond Second)> Zip<TFirst, TSecond>(this IEnumerable<TFirst> first, IEnumerable<TSecond> second) => first.Zip(second, (First, Second) => (First, Second));
 #endif
-        public static IEnumerable<(TFirst l, TSecond r)> ZipOuter<TFirst, TSecond>(this IEnumerable<TFirst> source, IEnumerable<TSecond> second)
+        public static IEnumerable<(TFirst First, TSecond Second)> ZipAll<TFirst, TSecond>(this IEnumerable<TFirst> first, IEnumerable<TSecond> second)
         {
 #pragma warning disable IDE0063
-            using (IEnumerator<TFirst> e1 = source.GetEnumerator())
+            using (IEnumerator<TFirst> e1 = first.GetEnumerator())
             {
                 using (IEnumerator<TSecond> e2 = second.GetEnumerator())
                 {
@@ -36,6 +57,9 @@ namespace Jerrycurl.Collections
         }
 #pragma warning restore IDE0063
 
+        public static int IndexOf<T>(this IEnumerable<T> source, Func<T, bool> predicate)
+            => source.Select((it, i) => ((T Item, int Index)?)(it, i)).FirstOrDefault(t => predicate(t.Value.Item))?.Index ?? -1;
+
         public static IEnumerable<TResult> NotNull<T, TResult>(this IEnumerable<T> source, Func<T, TResult> selector)
             where TResult : class
             => source.Select(selector).NotNull();
@@ -51,5 +75,9 @@ namespace Jerrycurl.Collections
             foreach (T item in lazy.Value)
                 yield return item;
         }
+
+#if NET20_BASE
+        public static IEnumerable<T> Append<T>(this IEnumerable<T> source, T value) => source.Concat(new[] { value });
+#endif
     }
 }

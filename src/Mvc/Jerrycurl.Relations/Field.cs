@@ -2,20 +2,26 @@
 using Jerrycurl.Relations.Internal;
 using Jerrycurl.Relations.Metadata;
 using System;
+using System.Diagnostics;
 using HashCode = Jerrycurl.Diagnostics.HashCode;
 
 namespace Jerrycurl.Relations
 {
+    [DebuggerDisplay("{Identity.Name}: {ToString(),nq}")]
     internal class Field<TValue, TParent> : IField
     {
         public FieldIdentity Identity { get; }
-        public object Value { get; private set; }
         public IField Model { get; }
-        public FieldType Type => FieldType.Value;
+        public FieldType Type { get; } = FieldType.Value;
+        public IRelationMetadata Metadata { get; }
+        public FieldData<TValue, TParent> Data { get; }
+        public bool HasChanged { get; private set; }
+        public object Snapshot { get; private set; }
+        public bool IsReadOnly { get; }
 
-        private readonly Action<TValue> binder;
+        IFieldData IField.Data => this.Data;
 
-        public Field(string name, MetadataIdentity metadata, TValue value, TParent parent, Action<TParent, int, TValue> binder, int index, IField model)
+        public Field(string name, IRelationMetadata metadata, FieldData<TValue, TParent> data, IField model, bool isReadOnly)
         {
             if (name == null)
                 throw new ArgumentNullException(nameof(name));
@@ -23,45 +29,65 @@ namespace Jerrycurl.Relations
             if (metadata == null)
                 throw new ArgumentNullException(nameof(metadata));
 
-            this.Identity = new FieldIdentity(metadata, name);
+            this.Identity = new FieldIdentity(metadata.Identity, name);
             this.Model = model ?? throw new ArgumentNullException(nameof(model));
-            this.Value = value;
-
-            if (binder != null)
-                this.binder = v => binder(parent, index, v);
+            this.Metadata = metadata;
+            this.Data = data ?? throw new ArgumentNullException(nameof(data));
+            this.Snapshot = data.Value;
+            this.IsReadOnly = isReadOnly;
         }
 
-        public void Bind(object newValue)
+        public void Update(object value)
         {
-            if (this.binder == null)
-                throw BindingException.FromField(this, "Field is not bindable.");
+            this.Snapshot = value;
+            this.HasChanged = true;
+        }
+
+        public void Commit()
+        {
+            if (!this.HasChanged)
+                return;
 
             try
             {
-                this.binder((TValue)newValue);
-                this.Value = newValue;
+                TValue typedValue = (TValue)this.Snapshot;
+
+                this.Data.Bind((TValue)this.Snapshot);
+                this.HasChanged = false;
             }
             catch (NotIndexableException)
             {
-                throw BindingException.FromField(this, "Property has no indexer.");
+                throw BindingException.From(this, "Property has no indexer.");
             }
             catch (NotWritableException)
             {
-                throw BindingException.FromField(this, "Property has no setter.");
+                throw BindingException.From(this, "Property has no setter.");
+            }
+            catch (NullReferenceException)
+            {
+                throw BindingException.From(this, "Property cannot be null.");
             }
             catch (Exception ex)
             {
-                throw BindingException.FromField(this, innerException: ex);
+                throw BindingException.From(this, innerException: ex);
             }
         }
 
+        public void Rollback()
+        {
+            if (!this.HasChanged)
+                return;
+
+            this.Snapshot = this.Data.Value;
+            this.HasChanged = false;
+        }
+
+        public override string ToString() => this.Snapshot != null ? this.Snapshot.ToString() : "<null>";
+
+        #region " Equality "
         public bool Equals(IField other) => Equality.Combine(this, other, m => m.Model, m => m.Identity);
         public override bool Equals(object obj) => (obj is IField other && this.Equals(other));
         public override int GetHashCode() => HashCode.Combine(this.Model, this.Identity);
-
-        public override string ToString()
-        {
-            return this.Identity.Name + "=" + (this.Value?.ToString() ?? "<null>");
-        }
+        #endregion
     }
 }

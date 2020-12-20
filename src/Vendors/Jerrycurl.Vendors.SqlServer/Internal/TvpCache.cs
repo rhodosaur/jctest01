@@ -1,7 +1,7 @@
 ﻿using Jerrycurl.Relations;
 using System;
 using System.Collections.Concurrent;
-#if SQLSERVER_LEGACY
+#if NET20_BASE
 using System.Data.SqlClient;
 #else
 using Microsoft.Data.SqlClient;
@@ -12,6 +12,6 @@ namespace Jerrycurl.Vendors.SqlServer.Internal
 {
     internal static class TvpCache
     {
-        public static ConcurrentDictionary<RelationIdentity, Action<SqlParameter, IRelation>> Binders { get; } = new ConcurrentDictionary<RelationIdentity, Action<SqlParameter, IRelation>>();
+        public static ConcurrentDictionary<IRelationHeader, Action<SqlParameter, IRelation>> Binders { get; } = new ConcurrentDictionary<IRelationHeader, Action<SqlParameter, IRelation>>();
     }
 }

@@ -1,5 +1,5 @@
 ﻿using Jerrycurl.Vendors.SqlServer.Metadata;
-#if SQLSERVER_LEGACY
+#if NET20_BASE
 using System.Data.SqlClient;
 #else
 using Microsoft.Data.SqlClient;
@@ -17,11 +17,8 @@ namespace Jerrycurl.Mvc
         public static void UseSqlServer(this DomainOptions options, string connectionString)
         {
             options.ConnectionFactory = () => new SqlConnection(connectionString);
-            options.Schemas.AddContract(new SqlServerContractResolver());
-
-            if (options.Sql == null)
-                options.Sql = new SqlOptions();
-
+            options.Use(new SqlServerContractResolver());
+            options.Sql ??= new SqlOptions();
             options.Sql.MaxParameters = 2098;
         }
     }

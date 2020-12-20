@@ -12,7 +12,7 @@ namespace Jerrycurl.Data.Metadata
 {
     public class DefaultBindingContractResolver : IBindingContractResolver
     {
-        private readonly Type[] intTypes = new[] { typeof(byte), typeof(sbyte), typeof(short), typeof(ushort), typeof(int), typeof(uint), typeof(long), typeof(ulong), typeof(char) };
+        private readonly Type[] intTypes = new[] { typeof(int), typeof(long), typeof(short), typeof(char), typeof(byte), typeof(sbyte), typeof(ushort), typeof(uint), typeof(ulong) };
         private readonly Type[] decTypes = new[] { typeof(float), typeof(double), typeof(decimal) };
 
         public int Priority => 0;
@@ -57,17 +57,37 @@ namespace Jerrycurl.Data.Metadata
 
         private MethodInfo GetAddMethod(IBindingMetadata metadata)
         {
-            Type elementType = this.GetListElementType(metadata);
+            Type itemType = this.GetListElementType(metadata);
+            Type oneType = this.GetOneValueType(metadata);
 
-            if (elementType != null)
-                return typeof(ICollection<>).MakeGenericType(elementType).GetMethod("Add");
+            if (itemType != null)
+                return typeof(ICollection<>).MakeGenericType(itemType).GetMethod("Add");
+            else if (oneType != null)
+            {
+                PropertyInfo valueInfo = metadata.Type.GetProperty(nameof(One<object>.Value), BindingFlags.Instance | BindingFlags.Public);
+
+                if (valueInfo == null || valueInfo.SetMethod == null)
+                    throw new InvalidOperationException("Invalid 'Value' property.");
+
+                return valueInfo.SetMethod;
+            }
 
             return null;
         }
 
-        private NewExpression GetConstructor(IBindingMetadata metadata)
+        private NewExpression GetConstructor(IBindingMetadata metadata) => this.GetListConstructor(metadata) ?? this.GetDefaultConstructor(metadata);
+
+        private bool IsOneValueType(IBindingMetadata metadata, out Type valueType)
+            => ((valueType = this.GetOneValueType(metadata)) != null);
+
+        private Type GetOneValueType(IBindingMetadata metadata)
         {
-            return this.GetListConstructor(metadata) ?? this.GetDefaultConstructor(metadata);
+            Type openType = this.GetOpenType(metadata);
+
+            if (openType == typeof(One<>))
+                return metadata.Type.GetGenericArguments()[0];
+
+            return null;
         }
 
         private Type GetListElementType(IBindingMetadata metadata)
@@ -80,7 +100,6 @@ namespace Jerrycurl.Data.Metadata
                 typeof(IReadOnlyCollection<>),
                 typeof(ICollection<>),
                 typeof(IEnumerable<>),
-                typeof(Many<>),
             };
 
             Type openType = this.GetOpenType(metadata);
@@ -137,12 +156,7 @@ namespace Jerrycurl.Data.Metadata
             return null;
         }
 
-        private Type GetUnwrappedType(Type type)
-        {
-            Type valueType = Nullable.GetUnderlyingType(type);
-
-            return valueType ?? type;
-        }
+        private Type GetUnwrappedType(Type type) => type != null ? (Nullable.GetUnderlyingType(type) ?? type) : null;
         private Type GetOpenType(IBindingMetadata metadata)
         {
             if (metadata.Type.IsGenericType)
@@ -172,7 +186,7 @@ namespace Jerrycurl.Data.Metadata
             Type elementType = this.GetListElementType(metadata);
             Type openType = this.GetOpenType(metadata);
 
-            if (elementType != null && openType == typeof(Many<>))
+            if (elementType != null && openType == typeof(One<>))
                 return Expression.New(metadata.Type);
             else if (elementType != null)
             {
@@ -239,34 +253,32 @@ namespace Jerrycurl.Data.Metadata
 
             Stack<ConditionalExpression> conditions = new Stack<ConditionalExpression>();
 
-            void addTypeIsCondition(Type testType, Expression newValue)
-            {
-                Expression typeIs = Expression.TypeIs(value, testType);
-
-                if (newValue.Type.IsValueType)
-                    newValue = this.GetConvertExpression(newValue, typeof(object));
-
-                conditions.Push(Expression.Condition(typeIs, newValue, value));
-            }
-
             if (this.IsNumberType(valueInfo.Metadata.Type))
             {
-                foreach (Type numberType in this.GetNumberTypes().Where(t => t != valueInfo.Metadata.Type))
-                {
-                    Expression unboxedValue = this.GetConvertExpression(value, numberType);
-                    Expression castValue = this.GetConvertExpression(unboxedValue, valueInfo.Metadata.Type);
+                List<Type> testTypes = this.GetNumberTypes().Where(t => t != valueInfo.Metadata.Type).ToList();
 
-                    addTypeIsCondition(numberType, castValue);
+                testTypes.Insert(0, valueInfo.Metadata.Type);
+
+                foreach (Type numberType in testTypes)
+                {
+                    Expression unboxedValue = this.GetConvertExpression(valueInfo.Metadata, value, numberType);
+                    Expression castValue = this.GetConvertExpression(valueInfo.Metadata, unboxedValue, valueInfo.Metadata.Type);
+
+                    AddTypeIsExpression(numberType, castValue);
                 }
             }
             else if (valueInfo.Metadata.Type == typeof(bool))
             {
+                List<Type> testTypes = this.GetNumberTypes().Where(t => t != valueInfo.Metadata.Type).ToList();
+
+                testTypes.Insert(0, typeof(bool));
+
                 foreach (Type numberType in this.GetNumberTypes())
                 {
-                    Expression unboxedValue = this.GetConvertExpression(value, numberType);
+                    Expression unboxedValue = this.GetConvertExpression(valueInfo.Metadata, value, numberType);
                     Expression boolValue = Expression.NotEqual(unboxedValue, Expression.Default(numberType));
 
-                    addTypeIsCondition(numberType, boolValue);
+                    AddTypeIsExpression(numberType, boolValue);
                 }
             }
 
@@ -278,16 +290,26 @@ namespace Jerrycurl.Data.Metadata
                 Expression isNull = this.GetIsNullExpression(valueInfo);
                 Expression defaultValue = Expression.Default(valueInfo.Metadata.Type);
 
-                if (valueInfo.Metadata.Type.IsValueType || defaultValue.Type != value.Type)
-                    defaultValue = this.GetConvertExpression(defaultValue, typeof(object));
+                if (valueInfo.Metadata.Type.IsValueType)
+                    defaultValue = this.GetConvertExpression(valueInfo.Metadata, defaultValue, typeof(object));
 
-                value = Expression.Condition(isNull, defaultValue, value);
+                value = Expression.Condition(isNull, defaultValue, value, typeof(object));
             }
 
-            if (value.Type != valueInfo.Metadata.Type)
-                value = this.GetConvertExpression(value, valueInfo.Metadata.Type);
+            if (!valueInfo.Metadata.Type.IsAssignableFrom(value.Type))
+                value = this.GetConvertExpression(valueInfo.Metadata, value, valueInfo.Metadata.Type);
 
             return value;
+
+            void AddTypeIsExpression(Type testType, Expression newValue)
+            {
+                Expression typeIs = Expression.TypeIs(value, testType);
+
+                if (newValue.Type.IsValueType)
+                    newValue = this.GetConvertExpression(valueInfo.Metadata, newValue, typeof(object));
+
+                conditions.Push(Expression.Condition(typeIs, newValue, value));
+            }
         }
 
         private Expression GetIsNullExpression(IBindingValueInfo valueInfo)
@@ -318,18 +340,18 @@ namespace Jerrycurl.Data.Metadata
             Expression value = valueInfo.Value;
 
             if (valueInfo.Value.Type == typeof(object) && sourceType != typeof(object))
-                value = this.GetConvertExpression(value, sourceType);
+                value = this.GetConvertExpression(valueInfo.Metadata, value, sourceType);
 
             Type structLeft = targetType.IsValueType ? Nullable.GetUnderlyingType(targetType) ?? targetType : null;
             Type structRight = value.Type.IsValueType ? Nullable.GetUnderlyingType(value.Type) ?? value.Type : null;
 
-            if (this.IsNumberType(structLeft) && this.IsNumberType(structRight))
-                value = this.GetConvertCheckedExpression(value, targetType);
+            if (this.IsNumberType(structLeft) && this.IsNumberType(structRight) && structLeft != structRight)
+                value = this.GetConvertCheckedExpression(valueInfo.Metadata, value, targetType);
             else if (structLeft == typeof(bool) && this.IsNumberType(structRight))
                 value = Expression.NotEqual(valueInfo.Value, Expression.Default(value.Type));
 
             if (targetType != value.Type)
-                value = this.GetConvertExpression(value, valueInfo.Metadata.Type);
+                value = this.GetConvertExpression(valueInfo.Metadata, value, valueInfo.Metadata.Type);
 
             if (valueInfo.CanBeDbNull || (valueInfo.CanBeNull && this.IsNotNullableValueType(targetType)))
             {
@@ -340,12 +362,12 @@ namespace Jerrycurl.Data.Metadata
             }
 
             if (!targetType.IsAssignableFrom(value.Type))
-                value = this.GetConvertExpression(value, targetType);
+                value = this.GetConvertExpression(valueInfo.Metadata, value, targetType);
 
             return value;
         }
 
-        private Expression GetConvertCheckedExpression(Expression value, Type type)
+        private Expression GetConvertCheckedExpression(IBindingMetadata metadata, Expression value, Type type)
         {
             try
             {
@@ -353,11 +375,11 @@ namespace Jerrycurl.Data.Metadata
             }
             catch (Exception ex)
             {
-                throw new BindingException($"Cannot convert type '{value.Type.Name}' to '{type.Name}'.", ex);
+                throw BindingException.InvalidCast(metadata, value.Type, type, ex);
             }
         }
 
-        private Expression GetConvertExpression(Expression value, Type type)
+        private Expression GetConvertExpression(IBindingMetadata metadata, Expression value, Type type)
         {
             try
             {
@@ -365,7 +387,7 @@ namespace Jerrycurl.Data.Metadata
             }
             catch (Exception ex)
             {
-                throw new BindingException($"Cannot convert type '{value.Type.Name}' to '{type.Name}'.", ex);
+                throw BindingException.InvalidCast(metadata, value.Type, type, ex);
             }
         }
 
@@ -374,29 +396,31 @@ namespace Jerrycurl.Data.Metadata
 
         private MethodInfo GetRecordReaderMethod(IBindingColumnInfo bindingInfo)
         {
-            if (bindingInfo.Column.Type == typeof(bool))
+            Type columnType = this.GetUnwrappedType(bindingInfo.Column.Type);
+
+            if (columnType == typeof(bool))
                 return this.GetRecordMethod(nameof(IDataReader.GetBoolean));
-            else if (bindingInfo.Column.Type == typeof(byte))
+            else if (columnType == typeof(byte))
                 return this.GetRecordMethod(nameof(IDataReader.GetByte));
-            else if (bindingInfo.Column.Type == typeof(float))
+            else if (columnType == typeof(float))
                 return this.GetRecordMethod(nameof(IDataReader.GetFloat));
-            else if (bindingInfo.Column.Type == typeof(double))
+            else if (columnType == typeof(double))
                 return this.GetRecordMethod(nameof(IDataReader.GetDouble));
-            else if (bindingInfo.Column.Type == typeof(decimal))
+            else if (columnType == typeof(decimal))
                 return this.GetRecordMethod(nameof(IDataReader.GetDecimal));
-            else if (bindingInfo.Column.Type == typeof(short))
+            else if (columnType == typeof(short))
                 return this.GetRecordMethod(nameof(IDataReader.GetInt16));
-            else if (bindingInfo.Column.Type == typeof(int))
+            else if (columnType == typeof(int))
                 return this.GetRecordMethod(nameof(IDataReader.GetInt32));
-            else if (bindingInfo.Column.Type == typeof(long))
+            else if (columnType == typeof(long))
                 return this.GetRecordMethod(nameof(IDataReader.GetInt64));
-            else if (bindingInfo.Column.Type == typeof(DateTime))
+            else if (columnType == typeof(DateTime))
                 return this.GetRecordMethod(nameof(IDataReader.GetDateTime));
-            else if (bindingInfo.Column.Type == typeof(Guid))
+            else if (columnType == typeof(Guid))
                 return this.GetRecordMethod(nameof(IDataReader.GetGuid));
-            else if (bindingInfo.Column.Type == typeof(char))
+            else if (columnType == typeof(char))
                 return this.GetRecordMethod(nameof(IDataReader.GetChar));
-            else if (bindingInfo.Column.Type == typeof(string))
+            else if (columnType == typeof(string))
                 return this.GetRecordMethod(nameof(IDataReader.GetString));
 
             return null;

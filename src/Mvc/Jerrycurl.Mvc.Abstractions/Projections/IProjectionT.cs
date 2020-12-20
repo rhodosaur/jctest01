@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using Jerrycurl.Mvc.Metadata;
-using Jerrycurl.Relations;
 
 namespace Jerrycurl.Mvc.Projections
 {
@@ -9,8 +8,8 @@ namespace Jerrycurl.Mvc.Projections
     {
         new IProjection<TModel> Map(Func<IProjectionAttribute, IProjectionAttribute> m);
         new IProjection<TModel> With(IProjectionMetadata metadata = null,
-                                     IEnumerable<IProjectionAttribute> attributes = null,
-                                     IField field = null,
+                                     IProjectionData data = null,
+                                     IEnumerable<IProjectionAttribute> header = null,
                                      IProjectionOptions options = null);
     }
 }

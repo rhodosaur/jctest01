@@ -11,6 +11,7 @@ using Jerrycurl.Mvc.Metadata.Annotations;
 using Jerrycurl.Reflection;
 using Jerrycurl.Data.Metadata;
 using Jerrycurl.Mvc.Sql;
+using Jerrycurl.Mvc.Internal;
 
 namespace Jerrycurl.Mvc
 {
@@ -38,7 +39,7 @@ namespace Jerrycurl.Mvc
                 throw new ArgumentNullException(nameof(args));
 
             if (descriptor.DomainType == null)
-                throw new ProcExecutionException($"No domain found for page type '{descriptor.PageType.GetSanitizedFullName()}'. Make sure to implement IDomain in a parent namespace.");
+                throw ProcExecutionException.DomainNotFound(descriptor.PageType);
 
             ProcCacheKey key = new ProcCacheKey(descriptor, args);
 
@@ -155,8 +156,8 @@ namespace Jerrycurl.Mvc
             {
                 ProcContext context = this.CreateContext(descriptor);
 
-                IProjectionIdentity modelIdentity = new ProjectionIdentity(modelSchema, new Relation(model, modelSchema));
-                IProjectionIdentity resultIdentity = new ProjectionIdentity(resultSchema);
+                ProjectionIdentity modelIdentity = new ProjectionIdentity(new Model(modelSchema, model));
+                ProjectionIdentity resultIdentity = new ProjectionIdentity(resultSchema);
 
                 IProjection modelProjection = new Projection(modelIdentity, context, modelMetadata);
                 IProjection resultProjection = new Projection(resultIdentity, context, resultMetadata);
@@ -194,7 +195,7 @@ namespace Jerrycurl.Mvc
 
                 return new ProcResult()
                 {
-                    Buffer = context.Executing.Buffer,
+                    Buffer = context.Execution.Buffer,
                     Domain = options,
                 };
             }
@@ -211,8 +212,8 @@ namespace Jerrycurl.Mvc
             ISchema pageSchema = options.Schemas.GetSchema(pageType);
             ISchema argsSchema = options.Schemas.GetSchema(argsType);
 
-            IProjectionMetadata pageMetadata = pageSchema.GetMetadata<IProjectionMetadata>() ?? throw new InvalidOperationException($"Metadata not found for type '{pageType.Name}'");
-            IProjectionMetadata argsMetadata = argsSchema.GetMetadata<IProjectionMetadata>() ?? throw new InvalidOperationException($"Metadata not found for type '{argsType.Name}'");
+            IProjectionMetadata pageMetadata = pageSchema.Require<IProjectionMetadata>();
+            IProjectionMetadata argsMetadata = argsSchema.Require<IProjectionMetadata>();
 
             if (pageMetadata.Item != null && argsMetadata.Item != null && pageMetadata.Item.Type.IsAssignableFrom(argsMetadata.Item.Type))
                 return argsMetadata.Item;
@@ -238,8 +239,8 @@ namespace Jerrycurl.Mvc
             ISchema pageSchema = options.Schemas.GetSchema(pageType);
             ISchema argsSchema = options.Schemas.GetSchema(argsType);
 
-            IProjectionMetadata pageMetadata = pageSchema.GetMetadata<IProjectionMetadata>() ?? throw new InvalidOperationException($"Metadata not found for type '{pageType.Name}'");
-            IProjectionMetadata argsMetadata = argsSchema.GetMetadata<IProjectionMetadata>() ?? throw new InvalidOperationException($"Metadata not found for type '{argsType.Name}'");
+            IProjectionMetadata pageMetadata = pageSchema.Require<IProjectionMetadata>();
+            IProjectionMetadata argsMetadata = argsSchema.Require<IProjectionMetadata>();
 
             if (argsMetadata.Item != null && pageMetadata.Type.IsAssignableFrom(argsMetadata.Item.Type))
                 return argsMetadata.Item;
@@ -347,7 +348,7 @@ namespace Jerrycurl.Mvc
             try
             {
                 if (this.serviceProvider != null)
-                    return (IDomain)this.serviceProvider.GetService(domainType) ?? throw new InvalidOperationException($"IServiceProvider returned a null instance for '{domainType.Name}'. Please add this type to your DI container.");
+                    return (IDomain)this.serviceProvider.GetService(domainType) ?? throw new InvalidOperationException($"Service provider returned a null instance for {domainType.Name}. Please add this type to your DI container.");
 
                 return (IDomain)Activator.CreateInstance(domainType);
             }
@@ -362,15 +363,14 @@ namespace Jerrycurl.Mvc
             return new DomainOptions()
             {
                 Dialect = new IsoDialect(),
-                Schemas = new SchemaStore(new DotNotation())
+                Schemas = new SchemaStore(new DotNotation(), new IMetadataBuilder[]
                 {
-                    new RelationMetadataBuilder(),
                     new BindingMetadataBuilder(),
                     new ReferenceMetadataBuilder(),
                     new TableMetadataBuilder(),
                     new ProjectionMetadataBuilder(),
                     new JsonMetadataBuilder(),
-                },
+                }),
                 Engine = this,
                 ConnectionFactory = () => throw new InvalidOperationException("No connection factory specified."),
                 Services = new ProcServices(this.serviceProvider),

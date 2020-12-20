@@ -1,22 +1,26 @@
 ﻿using Jerrycurl.Diagnostics;
+using Jerrycurl.Text;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Text;
 using HashCode = Jerrycurl.Diagnostics.HashCode;
 
 namespace Jerrycurl.Relations
 {
+    [DebuggerDisplay("{ToString(),nq}")]
     internal class Tuple : ITuple
     {
-        private readonly IField[] fields;
+        private readonly IField[] buffer;
 
         public int Degree { get; }
         public int Count => this.Degree;
 
-        public Tuple(IField[] fields, int degree)
+        public Tuple(IField[] buffer)
         {
-            this.fields = fields;
-            this.Degree = degree;
+            this.buffer = buffer ?? throw new ArgumentNullException(nameof(buffer));
+            this.Degree = buffer.Length;
         }
 
         public IField this[int index]
@@ -28,7 +32,7 @@ namespace Jerrycurl.Relations
                 else if (index >= this.Degree)
                     throw new IndexOutOfRangeException("Index must be within the degree of the tuple.");
 
-                return this.fields[index];
+                return this.buffer[index];
             }
         }
 
@@ -44,6 +48,19 @@ namespace Jerrycurl.Relations
 
         public override bool Equals(object obj) => (obj is ITuple tup && this.Equals(tup));
 
-        public override int GetHashCode() => HashCode.CombineAll(this.fields);
+        public override int GetHashCode() => HashCode.CombineAll(this.buffer);
+
+        internal static string Format(IEnumerable<IField> fields)
+        {
+            StringBuilder s = new StringBuilder();
+
+            s.Append('(');
+            s.AppendJoin(", ", fields);
+            s.Append(')');
+
+            return s.ToString();
+        }
+
+        public override string ToString() => Format(this);
     }
 }

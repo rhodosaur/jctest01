@@ -1,6 +1,6 @@
 ﻿using Jerrycurl.Collections;
 using Jerrycurl.Data.Metadata;
-using Jerrycurl.Mvc.Metadata.Annotations;
+using Jerrycurl.Data.Metadata.Annotations;
 using Jerrycurl.Relations.Metadata;
 using System;
 using System.Collections.ObjectModel;
@@ -10,13 +10,11 @@ namespace Jerrycurl.Mvc.Metadata
 {
     internal class JsonMetadataBuilder : Collection<IJsonContractResolver>, IMetadataBuilder<IJsonMetadata>
     {
-        public IJsonMetadata GetMetadata(IMetadataBuilderContext context) => this.GetMetadata(context, context.Identity);
+        public IJsonMetadata GetMetadata(IMetadataBuilderContext context) => this.GetMetadata(context, context.Relation);
 
-        private IJsonMetadata GetMetadata(IMetadataBuilderContext context, MetadataIdentity identity)
+        private IJsonMetadata GetMetadata(IMetadataBuilderContext context, IRelationMetadata relation)
         {
-            MetadataIdentity parentIdentity = identity.Parent();
-            IJsonMetadata parent = context.GetMetadata<IJsonMetadata>(parentIdentity.Name) ?? this.GetMetadata(context, parentIdentity);
-            IRelationMetadata relation = identity.GetMetadata<IRelationMetadata>();
+            IJsonMetadata parent = context.GetMetadata<IJsonMetadata>(relation.Parent.Identity.Name) ?? this.GetMetadata(context, relation.Parent);
 
             if (parent == null || relation == null)
                 return null;
@@ -43,12 +41,7 @@ namespace Jerrycurl.Mvc.Metadata
 
         public void Initialize(IMetadataBuilderContext context)
         {
-            IRelationMetadata relation = context.Identity.GetMetadata<IRelationMetadata>();
-
-            if (relation == null)
-                throw MetadataNotFoundException.FromMetadata<IRelationMetadata>(context.Identity);
-
-            JsonMetadata metadata = new JsonMetadata(relation);
+            JsonMetadata metadata = new JsonMetadata(context.Relation);
 
             metadata.MemberOf = metadata;
             metadata.Path = "$";

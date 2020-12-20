@@ -15,10 +15,10 @@ namespace Jerrycurl.Mvc.Sql
         public static ISqlContent Subquery(this IProjection projection, string queryName, object model = null)
         {
             ISchema modelSchema = projection.Context.Domain.Schemas.GetSchema(model?.GetType() ?? typeof(object));
-            IProjectionMetadata modelMetadata = modelSchema.GetMetadata<IProjectionMetadata>();
-            IField field = new Relation(model, modelSchema);
+            IProjectionMetadata modelMetadata = modelSchema.Require<IProjectionMetadata>();
+            IField field = new Model(modelSchema, model);
 
-            IProjectionIdentity modelIdentity = new ProjectionIdentity(modelSchema, field);
+            ProjectionIdentity modelIdentity = new ProjectionIdentity(field);
 
             IProjection modelProjection = new Projection(modelIdentity, projection.Context, modelMetadata);
             IProjection resultProjection = projection;
@@ -32,9 +32,8 @@ namespace Jerrycurl.Mvc.Sql
         public static ISqlContent Subcommand(this IProjection projection, string commandName)
         {
             ISchema resultSchema = projection.Context.Domain.Schemas.GetSchema(typeof(object));
-            IProjectionMetadata resultMetadata = resultSchema.GetMetadata<IProjectionMetadata>();
-
-            IProjectionIdentity resultIdentity = new ProjectionIdentity(resultSchema);
+            IProjectionMetadata resultMetadata = resultSchema.Require<IProjectionMetadata>();
+            ProjectionIdentity resultIdentity = new ProjectionIdentity(resultSchema);
 
             IProjection modelProjection = projection;
             IProjection resultProjection = new Projection(resultIdentity, projection.Context, resultMetadata);

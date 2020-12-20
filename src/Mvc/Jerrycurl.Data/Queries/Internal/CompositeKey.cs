@@ -1,23 +1,34 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using Jerrycurl.Diagnostics;
 using HashCode = Jerrycurl.Diagnostics.HashCode;
 
 namespace Jerrycurl.Data.Queries.Internal
 {
-    internal struct CompositeKey<T1> : IEquatable<CompositeKey<T1>>
+    internal static class CompositeKey
     {
-        private readonly T1 item1;
-
-        public CompositeKey(T1 item1)
+        public static Type Create(IEnumerable<Type> types)
         {
-            this.item1 = item1;
+            Type[] typeArray = types.ToArray();
+
+            if (typeArray.Length == 0)
+                return null;
+            else if (typeArray.Length == 1)
+                return typeArray[0];
+            else if (typeArray.Length == 2)
+                return typeof(CompositeKey<,>).MakeGenericType(typeArray[0], typeArray[1]);
+            else if (typeArray.Length == 3)
+                return typeof(CompositeKey<,,>).MakeGenericType(typeArray[0], typeArray[1], typeArray[2]);
+            else if (typeArray.Length == 4)
+                return typeof(CompositeKey<,,,>).MakeGenericType(typeArray[0], typeArray[1], typeArray[2], typeArray[3]);
+            else
+            {
+                Type restType = Create(types.Skip(4));
+
+                return typeof(CompositeKey<,,,,>).MakeGenericType(typeArray[0], typeArray[1], typeArray[2], typeArray[3], restType);
+            }
         }
-
-        public bool Equals(CompositeKey<T1> other) => Equality.Combine(this.item1, other.item1);
-        public override bool Equals(object obj) => (obj is CompositeKey<T1> c && this.Equals(c));
-        public override int GetHashCode() => HashCode.Combine(this.item1);
-
-        public override string ToString() => $"({this.item1})";
     }
 
     internal struct CompositeKey<T1, T2> : IEquatable<CompositeKey<T1, T2>>

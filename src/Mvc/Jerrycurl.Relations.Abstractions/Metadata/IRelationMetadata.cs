@@ -4,14 +4,19 @@ using System.Reflection;
 
 namespace Jerrycurl.Relations.Metadata
 {
-    public interface IRelationMetadata : IMetadata, IEquatable<IRelationMetadata>
+    public interface IRelationMetadata : IMetadata
     {
-        IEnumerable<IRelationMetadata> Properties { get; }
+        MetadataIdentity Identity { get; }
+        ISchema Schema { get; }
+        DotNotation Notation { get; }
+        IReadOnlyList<IRelationMetadata> Properties { get; }
         IRelationMetadata Parent { get; }
-        IRelationMetadata MemberOf { get; }
+        IRelationMetadata Owner { get; }
         IRelationMetadata Item { get; }
         RelationMetadataFlags Flags { get; }
         IReadOnlyList<Attribute> Annotations { get; }
+        IRelationMetadata Recursor { get; }
+        int Depth { get; set; }
 
         MethodInfo WriteIndex { get; }
         MethodInfo ReadIndex { get; }

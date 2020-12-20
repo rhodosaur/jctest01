@@ -14,10 +14,7 @@ namespace Jerrycurl.Mvc.Sql
         /// <returns>A new attribute containing the appended buffer.</returns>
         public static IProjectionAttribute JsonPath(this IProjectionAttribute attribute)
         {
-            IJsonMetadata metadata = attribute.Metadata.Identity.GetMetadata<IJsonMetadata>();
-
-            if (metadata == null)
-                throw ProjectionException.FromProjection(attribute, "JSON metadata not found.");
+            IJsonMetadata metadata = ProjectionHelper.GetJsonMetadata(attribute.Metadata);
 
             string literal = attribute.Context.Domain.Dialect.String(metadata.Path);
 

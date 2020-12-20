@@ -12,8 +12,8 @@ namespace Jerrycurl.Mvc
         {
             get
             {
-                if (this.stack.Count == 0)
-                    throw new ProcExecutionException("Execution stack is not initialized. Please add a IPageExecutionContext instance before accessing the stack.");
+                if (this.IsEmpty)
+                    throw ProcExecutionException.StackNotInitialized();
 
                 return this.stack.Peek();
             }

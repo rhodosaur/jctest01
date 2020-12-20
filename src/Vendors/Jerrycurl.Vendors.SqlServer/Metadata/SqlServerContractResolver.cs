@@ -2,7 +2,7 @@
 using System.Data;
 using System.Reflection;
 using Jerrycurl.Data.Metadata;
-#if SQLSERVER_LEGACY
+#if NET20_BASE
 using System.Data.SqlClient;
 #else
 using Microsoft.Data.SqlClient;

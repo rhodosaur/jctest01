@@ -5,17 +5,16 @@ using Jerrycurl.Relations.Metadata;
 
 namespace Jerrycurl.Data.Metadata
 {
-    public interface IBindingMetadata : IMetadata, IEquatable<IBindingMetadata>
+    public interface IBindingMetadata : IMetadata
     {
+        MetadataIdentity Identity { get; }
         Type Type { get; }
         MemberInfo Member { get; }
         BindingMetadataFlags Flags { get; }
         IBindingMetadata Parent { get; }
         IBindingMetadata Item { get; }
-        IBindingMetadata MemberOf { get; }
+        IBindingMetadata Owner { get; }
         IReadOnlyList<IBindingMetadata> Properties { get; }
-        IRelationMetadata Relation { get; }
-        IReadOnlyList<Attribute> Annotations { get; }
 
         IBindingParameterContract Parameter { get; }
         IBindingCompositionContract Composition { get; }

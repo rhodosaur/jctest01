@@ -6,7 +6,7 @@ namespace Jerrycurl.Data.Sessions
     public interface IParameter
     {
         string Name { get; }
-        IField Field { get; }
+        IField Source { get; }
 
         void Build(IDbDataParameter adoParameter);
     }

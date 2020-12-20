@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using Jerrycurl.Data.Commands;
 using Jerrycurl.Data.Sessions;
 using Jerrycurl.Mvc.Metadata;
-using Jerrycurl.Relations;
 
 namespace Jerrycurl.Mvc.Projections
 {
@@ -12,25 +11,24 @@ namespace Jerrycurl.Mvc.Projections
     /// </summary>
     public interface IProjection : ISqlWritable
     {
-        IProcContext Context { get; }
-        IProjectionIdentity Identity { get; }
-
+        ProjectionIdentity Identity { get; }
+        IEnumerable<IProjectionAttribute> Header { get; }
         IProjectionMetadata Metadata { get; }
+        IProjectionData Data { get; }
+        IProcContext Context { get; }
         IProjectionOptions Options { get; }
-        IField Source { get; }
-        IEnumerable<IProjectionAttribute> Attributes { get; }
 
         IProjection Append(IEnumerable<IParameter> parameters);
-        IProjection Append(IEnumerable<ICommandBinding> bindings);
+        IProjection Append(IEnumerable<IUpdateBinding> bindings);
         IProjection Append(string text);
         IProjection Append(params IParameter[] parameter);
-        IProjection Append(params ICommandBinding[] bindings);
+        IProjection Append(params IUpdateBinding[] bindings);
 
-        IProjection Map(Func<IProjectionAttribute, IProjectionAttribute> map);
+        IProjection Map(Func<IProjectionAttribute, IProjectionAttribute> mapperFunc);
 
         IProjection With(IProjectionMetadata metadata = null,
-                         IEnumerable<IProjectionAttribute> attributes = null,
-                         IField field = null,
+                         IProjectionData data = null,
+                         IEnumerable<IProjectionAttribute> header = null,
                          IProjectionOptions options = null);
     }
 }

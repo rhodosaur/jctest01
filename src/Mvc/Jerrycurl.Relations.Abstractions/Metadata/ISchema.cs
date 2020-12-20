@@ -1,13 +1,17 @@
-﻿using System;
-
-namespace Jerrycurl.Relations.Metadata
+﻿namespace Jerrycurl.Relations.Metadata
 {
-    public interface ISchema : IEquatable<ISchema>
+    public interface ISchema
     {
-        Type Model { get; }
-        IMetadataNotation Notation { get; }
+        IRelationMetadata Model { get; }
+        DotNotation Notation { get; }
+        ISchemaStore Store { get; }
 
-        TMetadata GetMetadata<TMetadata>(string name) where TMetadata : IMetadata;
-        TMetadata GetMetadata<TMetadata>() where TMetadata : IMetadata;
+        TMetadata Lookup<TMetadata>(string name) where TMetadata : IMetadata;
+        TMetadata Lookup<TMetadata>() where TMetadata : IMetadata;
+        IRelationMetadata Lookup(string name);
+
+        TMetadata Require<TMetadata>(string name) where TMetadata : IMetadata;
+        TMetadata Require<TMetadata>() where TMetadata : IMetadata;
+        IRelationMetadata Require(string name);
     }
 }

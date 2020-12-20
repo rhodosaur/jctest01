@@ -5,7 +5,6 @@ using Jerrycurl.Data.Metadata;
 using Jerrycurl.Data.Commands;
 using Jerrycurl.Mvc.Metadata;
 using Jerrycurl.Mvc.Projections;
-using Jerrycurl.Relations;
 using Jerrycurl.Relations.Metadata;
 using Jerrycurl.Collections;
 using Jerrycurl.Data.Sessions;
@@ -16,20 +15,25 @@ namespace Jerrycurl.Mvc.Sql
     {
         public static IProjection IsEq(this IProjection projection, IProjection other)
         {
-            List<IProjectionAttribute> newAttrs = new List<IProjectionAttribute>();
+            List<IProjectionAttribute> newHeader = new List<IProjectionAttribute>();
 
             foreach (var (l, r) in projection.Attrs().Zip(other.Attrs()))
             {
                 IProjectionAttribute newAttr = l;
 
                 newAttr = newAttr.Eq();
-                newAttr = newAttr.With(metadata: r.Metadata, field: r.Field).Par();
-                newAttr = newAttr.With(metadata: l.Metadata, field: l.Field);
+                newAttr = newAttr.With(data: r.Data).Par();
+                newAttr = newAttr.With(data: l.Data);
 
-                newAttrs.Add(newAttr);
+                newHeader.Add(newAttr);
             }
 
-            return projection.With(attributes: newAttrs);
+            ProjectionOptions newOptions = new ProjectionOptions(projection.Options)
+            {
+                Separator = Environment.NewLine + "AND" + Environment.NewLine,
+            };
+
+            return projection.With(header: newHeader, options: newOptions);
         }
 
         /// <summary>
@@ -39,22 +43,33 @@ namespace Jerrycurl.Mvc.Sql
         /// <returns>A new attribute containing the appended buffer.</returns>
         public static IProjectionAttribute Par(this IProjectionAttribute attribute)
         {
-            IField value = attribute.Field?.Invoke();
+            if (!attribute.Context.Domain.Dialect.Support.HasFlag(DialectSupport.InputParameters))
+                throw ProjectionException.ParametersNotSupported(attribute);
 
-            if (value != null)
+            if (attribute.Data?.Input != null)
             {
-                string paramName = attribute.Context.Lookup.Parameter(attribute.Identity, value);
+                string paramName = attribute.Context.Lookup.Parameter(attribute.Identity, attribute.Data.Input);
                 string dialectName = attribute.Context.Domain.Dialect.Parameter(paramName);
 
-                Parameter param = new Parameter(paramName, value);
+                Parameter param = new Parameter(paramName, attribute.Data.Input);
 
                 IProjectionAttribute result = attribute.Append(dialectName).Append(param);
 
                 if (attribute.Metadata.HasFlag(ProjectionMetadataFlags.Output))
                 {
-                    ParameterBinding binding = new ParameterBinding(param.Name, value);
+                    if (attribute.Context.Domain.Dialect.Support.HasFlag(DialectSupport.OutputParameters))
+                    {
+                        ParameterBinding binding = new ParameterBinding(attribute.Data.Output, param.Name);
 
-                    result = result.Append(binding);
+                        result = result.Append(binding);
+                    }
+
+                    if (attribute.Metadata.HasAnyFlag(ProjectionMetadataFlags.Cascade))
+                    {
+                        CascadeBinding binding = new CascadeBinding(attribute.Data.Output, attribute.Data.Input);
+
+                        result = result.Append(binding);
+                    }
                 }
 
                 return result;
@@ -111,7 +126,7 @@ namespace Jerrycurl.Mvc.Sql
         /// Appends a comma-separated list of parameter names and values, e.g. <c>@P0, @P1, @P2</c>, to a new attribute buffer.
         /// </summary>
         /// <param name="projection">The current projection.</param>
-        /// /// <param name="expression">Expression selecting a projection target.</param>
+        /// <param name="expression">Expression selecting a projection target.</param>
         /// <returns>A new attribute containing the appended buffer.</returns>
         public static IProjectionAttribute ParList<TModel, TItem>(this IProjection<TModel> projection, Expression<Func<TModel, IEnumerable<TItem>>> expression)
             => projection.Open(expression).ParList();

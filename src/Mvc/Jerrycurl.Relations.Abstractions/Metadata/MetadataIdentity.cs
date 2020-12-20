@@ -1,6 +1,5 @@
 ﻿using System;
 using Jerrycurl.Diagnostics;
-using Jerrycurl.Reflection;
 using HashCode = Jerrycurl.Diagnostics.HashCode;
 
 namespace Jerrycurl.Relations.Metadata
@@ -9,7 +8,7 @@ namespace Jerrycurl.Relations.Metadata
     {
         public string Name { get; }
         public ISchema Schema { get; }
-        public IMetadataNotation Notation => this.Schema.Notation;
+        public DotNotation Notation => this.Schema.Notation;
 
         public MetadataIdentity(ISchema schema, string name)
         {
@@ -23,11 +22,15 @@ namespace Jerrycurl.Relations.Metadata
 
         }
 
-        public TMetadata GetMetadata<TMetadata>()
-            where TMetadata : IMetadata
-            => this.Schema.GetMetadata<TMetadata>(this.Name);
+        public TMetadata Lookup<TMetadata>() where TMetadata : IMetadata
+            => this.Schema.Lookup<TMetadata>(this.Name);
 
-        public MetadataIdentity Parent()
+        public TMetadata Require<TMetadata>() where TMetadata : IMetadata
+            => this.Schema.Require<TMetadata>(this.Name);
+
+        public override string ToString() => $"{this.Schema}(\"{this.Name}\")";
+
+        public MetadataIdentity Pop()
         {
             string parentName = this.Notation.Parent(this.Name);
 
@@ -37,10 +40,20 @@ namespace Jerrycurl.Relations.Metadata
             return null;
         }
 
-        public MetadataIdentity Child(string propertyName) => new MetadataIdentity(this.Schema, this.Notation.Combine(this.Name, propertyName));
+        public MetadataIdentity Push(string propertyName) => new MetadataIdentity(this.Schema, this.Notation.Combine(this.Name, propertyName));
+
+        #region " Equality "
+        public bool Equals(string name)
+            => this.Equals(new MetadataIdentity(this.Schema, name));
+
+        public bool Equals(ISchema schema, string name)
+            => this.Equals(new MetadataIdentity(schema, name));
 
         public bool Equals(MetadataIdentity other)
         {
+            if (other == null)
+                return false;
+
             Equality eq = new Equality();
 
             eq.Add(this.Name, other.Name, this.Notation.Comparer);
@@ -59,13 +72,6 @@ namespace Jerrycurl.Relations.Metadata
 
             return hashCode.ToHashCode();
         }
-
-        public override string ToString()
-        {
-            if (this.Notation.Equals(this.Notation.Model(), this.Name))
-                return $"{this.Schema.Model.GetSanitizedName()}:<model>";
-
-            return $"{this.Schema.Model.GetSanitizedName()}:{this.Name}";
-        }
+        #endregion
     }
 }
